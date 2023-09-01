@@ -15,8 +15,7 @@ from torch.utils.data import Subset
 
 
 class NablaDFT(InMemoryDataset):
-
-    def __init__(self, root, split="train2k",transform=None, pre_transform=None):
+    def __init__(self, root, split="train2k", transform=None, pre_transform=None):
         
         # For simplicity, always use one type of molecules 
         '''
@@ -32,11 +31,11 @@ class NablaDFT(InMemoryDataset):
                 "which is not accounted for during training."
             )
         '''
+        #saelf.raw_file_names = [f'/mnt/2tb/khrabrov/schnet/data/{split}_v2_formation_energy_w_forces.db']
+        self.split = split
         super(NablaDFT, self).__init__(root, transform, pre_transform)
-
         self.offsets = [0]
         self.data_all, self.slices_all = [], []
-        self.split = split
         for path in self.processed_paths:
             data, slices = torch.load(path)
             self.data_all.append(data)
@@ -45,6 +44,14 @@ class NablaDFT(InMemoryDataset):
                 len(slices[list(slices.keys())[0]]) - 1 + self.offsets[-1]
             )
 
+    @property
+    def processed_file_names(self):
+        return f'{self.split}.pt'
+            
+    @property
+    def raw_file_names(self):
+        return [f'/mnt/2tb/khrabrov/schnet/data/{self.split}_v2_formation_energy_w_forces.db']
+    
     def len(self):
         return sum(
             len(slices[list(slices.keys())[0]]) - 1 for slices in self.slices_all
@@ -58,18 +65,9 @@ class NablaDFT(InMemoryDataset):
         self.slices = self.slices_all[data_idx]
         return super(NablaDFT, self).get(idx - self.offsets[data_idx])
 
-
-
-    @property
-    def raw_file_names(self) -> List[str]:
-        return [f'/mnt/2tb/khrabrov/{self.split}_formation_energy.db']
-    @property
-    def processed_file_names(self) -> str:
-        #return "_".join([self.split, str(np.round(self.radius, 2)), self.feature_type]) + '.pt'
-        return self.split + '.pt'
-
-    def download(self):
-        raise NotImplementedError
+    #def download(self):
+    #    return
+    #    raise NotImplementedError
 
     def process(self):
         db = connect(self.raw_file_names[0])
@@ -78,7 +76,12 @@ class NablaDFT(InMemoryDataset):
             z = torch.from_numpy(db_row.numbers).long()
             positions = torch.from_numpy(db_row.positions).float()
             y = torch.from_numpy(np.array(db_row.data['energy'])).float()
-            samples.append(Data(z=z, pos=positions, y=y))
+            if "forces" in db_row.data:
+                dy = torch.from_numpy(np.array(db_row.data['forces'])).float()
+            else:
+                dy = torch.zeros(1)
+
+            samples.append(Data(z=z, pos=positions, y=y, dy=dy))
 
         if self.pre_filter is not None:
             samples = [data for data in samples if self.pre_filter(data)]
@@ -182,13 +185,13 @@ def make_splits(
 
 
 def get_nablaDFT_datasets(root, 
-    train_size, val_size, test_size, 
+    split, train_size, val_size, test_size, 
     seed):
     '''
         Return training, validation and testing sets of MD17 with the same data partition as TorchMD-NET.
     '''
 
-    all_dataset = NablaDFT(root)
+    all_dataset = NablaDFT(root, split=split)
 
     idx_train, idx_val, idx_test = make_splits(
         len(all_dataset),
